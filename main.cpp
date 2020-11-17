@@ -2,15 +2,15 @@
 #include<time.h>
 #include<mpi.h>
 
-#define ROWSA 5
-#define COLSA 5 //TODO: Change to 32
-#define ROWSB 5 //TODO: Change to 32
-#define COLSB 5
-#define ROWSC 5
-#define COLSC 5
-#define MASTER 0
-#define MASTERTAG 1
-#define WORKERTAG 2
+#define ROWSA 2000      //Rows in left-sided matrix A
+#define COLSA 32        //Columns in left-sided matrix A
+#define ROWSB 32        //Rows in right-sided matrix B
+#define COLSB 2000      //Columns in right sided matrix B
+#define ROWSC 2000      //Rows in result matrix C
+#define COLSC 2000      //Columns in result matrix C
+#define MASTER 0        //ID of master task
+#define MASTERTAG 1     //Tag of master task
+#define WORKERTAG 2     //Tag of worker task
 
 void makeArrA(int arr[ROWSA][COLSA]);
 void makeArrB(int arr[ROWSB][COLSB]);
@@ -36,13 +36,13 @@ int main(int argc, char* argv[]) {
 
     initMPI(argc, argv);
     makeMatrices();
-    calculateRowDistributions();
 
     if(numTasks == 1) {
         nonParallelExec();
     }
 
-    start = clock();
+    calculateRowDistributions();
+
     if(taskID == MASTER) {
         masterTask();
     } else {
@@ -54,10 +54,11 @@ int main(int argc, char* argv[]) {
 
 void masterTask() {
 
-    int MPICountA, MPICountB;
+    //printArrA(matA);
+    //printArrB(matB);
+    start = clock();
 
-    printArrA(matA);
-    printArrB(matB);
+    int MPICountA, MPICountB;
 
     for(int i = 1 ; i < numTasks ; i++) {
 
@@ -68,7 +69,7 @@ void masterTask() {
 
         MPI_Send(&rowsToDo, 1, MPI_INT, i, MASTERTAG, MPI_COMM_WORLD);
         MPI_Send(&rowStart, 1, MPI_INT, i, MASTERTAG, MPI_COMM_WORLD);
-        MPI_Send(&matA, MPICountA, MPI_INT, i, MASTERTAG, MPI_COMM_WORLD);
+        MPI_Send(&matA[rowStart], MPICountA, MPI_INT, i, MASTERTAG, MPI_COMM_WORLD);
         MPI_Send(&matB, MPICountB, MPI_INT, i, MASTERTAG, MPI_COMM_WORLD);
     }
 
@@ -76,7 +77,7 @@ void masterTask() {
 
         MPI_Recv(&rowStart, 1, MPI_INT, i, WORKERTAG, MPI_COMM_WORLD, &status);
         MPI_Recv(&rowsToDo, 1, MPI_INT, i, WORKERTAG, MPI_COMM_WORLD, &status);
-        MPI_Recv(&matC, COLSC*ROWSC, MPI_INT, i, WORKERTAG, MPI_COMM_WORLD, &status);
+        MPI_Recv(&matC[rowStart], rowsToDo*COLSC, MPI_INT, i, WORKERTAG, MPI_COMM_WORLD, &status);
 
 
         for(int y = rowStart; y < rowStart + rowsToDo; y++) {
@@ -85,21 +86,19 @@ void masterTask() {
             }
         }
         //printf("Master %d received start at row: %d and has %d rows to do\n", taskID, rowStart, rowsToDo);
-        end = clock();
-        double execTime = (double)(end-start)/CLOCKS_PER_SEC * 1000000;
-        printArrC(result, taskID);
-        printf("Parallel execution done in %f us\n", execTime);
     }
+
+    end = clock();
+    double execTime = (double)(end-start)/CLOCKS_PER_SEC * 1000000;
+    //printArrC(result, taskID);
+    printf("Parallel execution done in %f us\n", execTime);
 }
 
 void workerTask() {
 
-    int numRows;
-    int count = 0;
-
     MPI_Recv(&rowsToDo, 1, MPI_INT, 0, MASTERTAG, MPI_COMM_WORLD, &status);
     MPI_Recv(&rowStart, 1, MPI_INT, 0, MASTERTAG, MPI_COMM_WORLD, &status);
-    MPI_Recv(&matA, rowsToDo*COLSA, MPI_INT, 0, MASTERTAG, MPI_COMM_WORLD, &status);
+    MPI_Recv(&matA[rowStart], rowsToDo*COLSA, MPI_INT, 0, MASTERTAG, MPI_COMM_WORLD, &status);
     MPI_Recv(&matB, ROWSB*COLSB, MPI_INT, 0, MASTERTAG, MPI_COMM_WORLD, &status);
 
     //printf("rank %d starts at row: %d and has %d rows to do\n", taskID, rowStart, rowsToDo);
@@ -119,7 +118,7 @@ void workerTask() {
 
     MPI_Send(&rowStart, 1, MPI_INT, 0, WORKERTAG, MPI_COMM_WORLD);
     MPI_Send(&rowsToDo, 1, MPI_INT, 0, WORKERTAG, MPI_COMM_WORLD);
-    MPI_Send(&matC, COLSC*ROWSC, MPI_INT, 0, WORKERTAG, MPI_COMM_WORLD);
+    MPI_Send(&matC[rowStart], rowsToDo*COLSC, MPI_INT, 0, WORKERTAG, MPI_COMM_WORLD);
 }
 
 
@@ -140,7 +139,7 @@ void nonParallelExec() {
 
     end = clock();
     double execTime = (double)(end-start)/CLOCKS_PER_SEC * 1000000;
-    printArrC(matC, taskID);
+    //printArrC(matC, taskID);
     printf("Non-parallel execution done in %f us\n", execTime);
 
     MPI_Finalize();
