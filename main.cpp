@@ -22,26 +22,27 @@ void makeMatrices();
 void initMPI(int &argc, char **&argv);
 void masterTask();
 void workerTask();
-int findRowsWithOneExtra();
+void calculateRowDistributions();
 
 int matA[ROWSA][COLSA];
 int matB[ROWSB][COLSB];
 int matC[ROWSC][COLSC];
+int result[ROWSC][COLSC];
 int numTasks, taskID, rowsPerTask = 0, rowsWithExtra = 0, rowStart = 0, rowsToDo = 0;
+clock_t start, end;
 MPI_Status status;
 
 int main(int argc, char* argv[]) {
 
-    makeMatrices();
     initMPI(argc, argv);
+    makeMatrices();
+    calculateRowDistributions();
 
     if(numTasks == 1) {
         nonParallelExec();
     }
 
-    rowsPerTask = ROWSA / (numTasks-1);
-    rowsWithExtra = findRowsWithOneExtra();
-
+    start = clock();
     if(taskID == MASTER) {
         masterTask();
     } else {
@@ -60,7 +61,6 @@ void masterTask() {
 
     for(int i = 1 ; i < numTasks ; i++) {
 
-        //MPICountA = i != numTasks - 1 ? rowsPerTask * COLSA : (rowsPerTask+remainderRows) * COLSA;
         MPICountA = i <= rowsWithExtra ? (rowsPerTask + 1) * COLSA : rowsPerTask * COLSA;
         MPICountB = ROWSB * COLSB;
         rowStart += rowsToDo;
@@ -76,11 +76,19 @@ void masterTask() {
 
         MPI_Recv(&rowStart, 1, MPI_INT, i, WORKERTAG, MPI_COMM_WORLD, &status);
         MPI_Recv(&rowsToDo, 1, MPI_INT, i, WORKERTAG, MPI_COMM_WORLD, &status);
-        MPI_Recv(&matC, rowsToDo*COLSC, MPI_INT, i, WORKERTAG, MPI_COMM_WORLD, &status);
+        MPI_Recv(&matC, COLSC*ROWSC, MPI_INT, i, WORKERTAG, MPI_COMM_WORLD, &status);
 
+
+        for(int y = rowStart; y < rowStart + rowsToDo; y++) {
+            for(int x = 0; x < ROWSC; x++) {
+                result[y][x] = matC[y][x];
+            }
+        }
         //printf("Master %d received start at row: %d and has %d rows to do\n", taskID, rowStart, rowsToDo);
-
-        printArrC(matC, taskID);
+        end = clock();
+        double execTime = (double)(end-start)/CLOCKS_PER_SEC * 1000000;
+        printArrC(result, taskID);
+        printf("Parallel execution done in %f us\n", execTime);
     }
 }
 
@@ -94,7 +102,7 @@ void workerTask() {
     MPI_Recv(&matA, rowsToDo*COLSA, MPI_INT, 0, MASTERTAG, MPI_COMM_WORLD, &status);
     MPI_Recv(&matB, ROWSB*COLSB, MPI_INT, 0, MASTERTAG, MPI_COMM_WORLD, &status);
 
-    printf("rank %d starts at row: %d and has %d rows to do\n", taskID, rowStart, rowsToDo);
+    //printf("rank %d starts at row: %d and has %d rows to do\n", taskID, rowStart, rowsToDo);
 
     for(int i = rowStart; i < rowStart + rowsToDo; i++) {
         for(int j = 0; j < COLSC; j++){
@@ -107,17 +115,17 @@ void workerTask() {
         }
     }
 
-    printArrC(matC, taskID);
+    //printArrC(matC, taskID);
 
     MPI_Send(&rowStart, 1, MPI_INT, 0, WORKERTAG, MPI_COMM_WORLD);
     MPI_Send(&rowsToDo, 1, MPI_INT, 0, WORKERTAG, MPI_COMM_WORLD);
-    MPI_Send(&matC[rowStart], rowsToDo*COLSC, MPI_INT, 0, WORKERTAG, MPI_COMM_WORLD);
+    MPI_Send(&matC, COLSC*ROWSC, MPI_INT, 0, WORKERTAG, MPI_COMM_WORLD);
 }
 
 
 void nonParallelExec() {
 
-    clock_t begin = clock();
+    start = clock();
 
     for(int i = 0; i < ROWSC; i++) {
         for(int j = 0; j < COLSC; j++){
@@ -130,8 +138,8 @@ void nonParallelExec() {
         }
     }
 
-    clock_t end = clock();
-    double execTime = (double)(end-begin)/CLOCKS_PER_SEC * 1000000;
+    end = clock();
+    double execTime = (double)(end-start)/CLOCKS_PER_SEC * 1000000;
     printArrC(matC, taskID);
     printf("Non-parallel execution done in %f us\n", execTime);
 
@@ -139,12 +147,14 @@ void nonParallelExec() {
     exit(EXIT_SUCCESS);
 }
 
-int findRowsWithOneExtra() {
+void calculateRowDistributions() {
 
-    double rowsWithExtra = (ROWSA + 0.0) / (numTasks-1);
-    int intPart = (int) rowsWithExtra;
-    rowsWithExtra -= intPart;
-    return (int)(rowsWithExtra * (numTasks-1));
+    rowsPerTask = ROWSA / (numTasks-1);
+
+    double rowsWithExtraDouble = (ROWSA + 0.0) / (numTasks - 1);
+    int intPart = (int) rowsWithExtraDouble;
+    rowsWithExtraDouble -= intPart;
+    rowsWithExtra = (int)(rowsWithExtraDouble * (numTasks - 1));
 }
 
 void initMPI(int &argc, char **&argv) {
